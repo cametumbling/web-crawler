@@ -26,9 +26,14 @@ func (m *mockFetcher) Fetch(url string) ([]byte, error) {
 type mockParser struct {
 	links []string
 	err   error
+	// fn is an optional callback for custom behavior
+	fn func(io.Reader) ([]string, error)
 }
 
 func (m *mockParser) ExtractLinks(r io.Reader) ([]string, error) {
+	if m.fn != nil {
+		return m.fn(r)
+	}
 	if m.err != nil {
 		return nil, m.err
 	}
