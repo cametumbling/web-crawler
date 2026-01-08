@@ -22,6 +22,7 @@ func main() {
 	workers := flag.Int("workers", 8, "Number of concurrent workers")
 	maxPages := flag.Int("max-pages", 0, "Maximum pages to visit (0 = unlimited)")
 	rateMs := flag.Int("rate-ms", 0, "Minimum milliseconds between requests (0 = no limit)")
+	format := flag.String("format", "text", "Output format: text or json")
 
 	flag.Parse()
 
@@ -45,6 +46,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: -rate-ms cannot be negative\n")
 		os.Exit(1)
 	}
+	if *format != "text" && *format != "json" {
+		fmt.Fprintf(os.Stderr, "Error: -format must be 'text' or 'json'\n")
+		os.Exit(1)
+	}
 
 	// Create HTTP client with optional rate limiting
 	var rateLimit time.Duration
@@ -61,16 +66,30 @@ func main() {
 
 	// Create coordinator
 	coord, err := crawler.NewCoordinator(crawler.Config{
-		StartURL:   *url,
-		MaxPages:   *maxPages,
-		NumWorkers: *workers,
-		Fetcher:    httpClient,
-		Parser:     &parserAdapter{},
-		Output:     os.Stdout,
+		StartURL:     *url,
+		MaxPages:     *maxPages,
+		NumWorkers:   *workers,
+		Fetcher:      httpClient,
+		Parser:       &parserAdapter{},
+		Output:       os.Stdout,
+		OutputFormat: *format,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating coordinator: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Log crawl configuration to stderr
+	log.Printf("Starting crawler")
+	log.Printf("  URL: %s", *url)
+	log.Printf("  Workers: %d", *workers)
+	if *maxPages > 0 {
+		log.Printf("  Max pages: %d", *maxPages)
+	} else {
+		log.Printf("  Max pages: unlimited")
+	}
+	if *rateMs > 0 {
+		log.Printf("  Rate limit: %dms between requests", *rateMs)
 	}
 
 	// Set up context with cancellation for graceful shutdown

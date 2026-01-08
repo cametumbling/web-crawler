@@ -2,11 +2,14 @@ package crawler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"sync"
+	"time"
 )
 
 // Coordinator is the brain of the crawler.
@@ -33,10 +36,14 @@ type Coordinator struct {
 	maxPages int
 	// visitCount tracks how many pages we've visited
 	visitCount int
+	// errorCount tracks how many pages failed to fetch/parse
+	errorCount int
 	// numWorkers is the number of worker goroutines
 	numWorkers int
 	// output is where we write results (default: os.Stdout)
 	output io.Writer
+	// outputFormat is the output format: "text" or "json"
+	outputFormat string
 }
 
 // Config contains configuration for the Coordinator.
@@ -53,6 +60,8 @@ type Config struct {
 	Parser Parser
 	// Output is where to write results (default: os.Stdout)
 	Output io.Writer
+	// OutputFormat is the output format: "text" or "json" (default: "text")
+	OutputFormat string
 }
 
 // NewCoordinator creates a new Coordinator with the given configuration.
@@ -84,23 +93,31 @@ func NewCoordinator(cfg Config) (*Coordinator, error) {
 		output = os.Stdout
 	}
 
+	outputFormat := cfg.OutputFormat
+	if outputFormat == "" {
+		outputFormat = "text"
+	}
+
 	return &Coordinator{
-		visited:    make(map[string]bool),
-		workCh:     make(chan WorkItem),
-		resultsCh:  make(chan Result),
-		fetcher:    cfg.Fetcher,
-		parser:     cfg.Parser,
-		startURL:   startURL,
-		startHost:  startURL.Hostname(),
-		maxPages:   cfg.MaxPages,
-		numWorkers: cfg.NumWorkers,
-		output:     output,
+		visited:      make(map[string]bool),
+		workCh:       make(chan WorkItem),
+		resultsCh:    make(chan Result),
+		fetcher:      cfg.Fetcher,
+		parser:       cfg.Parser,
+		startURL:     startURL,
+		startHost:    startURL.Hostname(),
+		maxPages:     cfg.MaxPages,
+		numWorkers:   cfg.NumWorkers,
+		output:       output,
+		outputFormat: outputFormat,
 	}, nil
 }
 
 // Crawl starts the crawl and blocks until completion.
 // Respects context cancellation for graceful shutdown.
 func (c *Coordinator) Crawl(ctx context.Context) error {
+	startTime := time.Now()
+
 	// Track when workers exit so we can close resultsCh
 	var workerWg sync.WaitGroup
 
@@ -148,6 +165,17 @@ func (c *Coordinator) Crawl(ctx context.Context) error {
 	// Process results until all workers are done
 	c.processResults(ctx)
 
+	// Print summary to stderr
+	duration := time.Since(startTime)
+	log.Printf("\n=== Crawl Summary ===")
+	log.Printf("Total pages visited: %d", c.visitCount)
+	log.Printf("Total errors: %d", c.errorCount)
+	log.Printf("Duration: %v", duration)
+	if duration.Seconds() > 0 {
+		rate := float64(c.visitCount) / duration.Seconds()
+		log.Printf("Rate: %.2f pages/sec", rate)
+	}
+
 	return nil
 }
 
@@ -175,6 +203,7 @@ func (c *Coordinator) processResult(ctx context.Context, result Result) {
 
 	// If there was an error, we still call wg.Done() but don't enqueue new work
 	if result.Err != nil {
+		c.errorCount++
 		c.wg.Done()
 		return
 	}
@@ -252,21 +281,52 @@ func (c *Coordinator) sanitizeLinks(rawHrefs []string, pageURL string) []string 
 	return sanitized
 }
 
-// printResult prints the result to stdout in the required format.
-func (c *Coordinator) printResult(result Result) {
-	// Print the final URL (after following redirects)
-	fmt.Fprintf(c.output, "Visited: %s\n", result.FinalURL)
-	fmt.Fprintf(c.output, "Links found:\n")
+// PageResult represents the JSON output for a single page.
+type PageResult struct {
+	URL   string   `json:"url"`
+	Links []string `json:"links"`
+	Error string   `json:"error,omitempty"`
+}
 
-	if result.Err != nil {
-		// On error, print empty links list
-		return
+// printResult prints the result to stdout in the configured format (text or json).
+func (c *Coordinator) printResult(result Result) {
+	// Sanitize all links (not just in-scope ones)
+	var sanitized []string
+	if result.Err == nil {
+		sanitized = c.sanitizeLinks(result.Links, result.FinalURL)
 	}
 
-	// Sanitize and print all links found (not just in-scope ones)
-	// Use FinalURL for base URL resolution
-	sanitized := c.sanitizeLinks(result.Links, result.FinalURL)
-	for _, link := range sanitized {
-		fmt.Fprintf(c.output, "%s\n", link)
+	if c.outputFormat == "json" {
+		// JSON output
+		pageResult := PageResult{
+			URL:   result.FinalURL,
+			Links: sanitized,
+		}
+		if result.Err != nil {
+			pageResult.Error = result.Err.Error()
+		}
+		if sanitized == nil {
+			pageResult.Links = []string{} // Ensure empty array, not null
+		}
+
+		jsonBytes, err := json.Marshal(pageResult)
+		if err != nil {
+			log.Printf("Error marshaling JSON: %v", err)
+			return
+		}
+		fmt.Fprintf(c.output, "%s\n", jsonBytes)
+	} else {
+		// Text output (default)
+		fmt.Fprintf(c.output, "Visited: %s\n", result.FinalURL)
+		fmt.Fprintf(c.output, "Links found:\n")
+
+		if result.Err != nil {
+			// On error, print empty links list
+			return
+		}
+
+		for _, link := range sanitized {
+			fmt.Fprintf(c.output, "%s\n", link)
+		}
 	}
 }

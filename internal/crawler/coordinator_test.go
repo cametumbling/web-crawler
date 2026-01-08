@@ -3,6 +3,7 @@ package crawler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -445,5 +446,139 @@ func TestCoordinator_NormalizesStartURL(t *testing.T) {
 	out := output.String()
 	if !strings.Contains(out, "Visited: https://example.com/") {
 		t.Errorf("output has wrong normalized URL: %s", out)
+	}
+}
+
+func TestCoordinator_JSONOutput(t *testing.T) {
+	output := &bytes.Buffer{}
+	fetcher := &mockFetcher{
+		responses: map[string][]byte{
+			"https://example.com/":     []byte("<html>page1</html>"),
+			"https://example.com/page2": []byte("<html>page2</html>"),
+		},
+	}
+	parser := &mockParser{
+		fn: func(r io.Reader) ([]string, error) {
+			// First page returns links, second returns empty
+			body := make([]byte, 1024)
+			n, _ := r.Read(body)
+			if strings.Contains(string(body[:n]), "page1") {
+				return []string{"/page2", "/external"}, nil
+			}
+			return []string{}, nil
+		},
+	}
+
+	cfg := Config{
+		StartURL:     "https://example.com/",
+		NumWorkers:   1,
+		Fetcher:      fetcher,
+		Parser:       parser,
+		Output:       output,
+		OutputFormat: "json",
+	}
+
+	coord, err := NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator() error = %v", err)
+	}
+
+	err = coord.Crawl(context.Background())
+	if err != nil {
+		t.Fatalf("Crawl() error = %v", err)
+	}
+
+	// Parse JSON output
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 JSON lines, got %d: %s", len(lines), output.String())
+	}
+
+	// Check first page
+	var page1 PageResult
+	if err := json.Unmarshal([]byte(lines[0]), &page1); err != nil {
+		t.Fatalf("failed to parse JSON line 1: %v", err)
+	}
+
+	if page1.URL != "https://example.com/" {
+		t.Errorf("page1.URL = %q, want %q", page1.URL, "https://example.com/")
+	}
+	if len(page1.Links) != 2 {
+		t.Errorf("page1 has %d links, want 2", len(page1.Links))
+	}
+	if page1.Error != "" {
+		t.Errorf("page1.Error = %q, want empty", page1.Error)
+	}
+
+	// Check second page
+	var page2 PageResult
+	if err := json.Unmarshal([]byte(lines[1]), &page2); err != nil {
+		t.Fatalf("failed to parse JSON line 2: %v", err)
+	}
+
+	if page2.URL != "https://example.com/page2" {
+		t.Errorf("page2.URL = %q, want %q", page2.URL, "https://example.com/page2")
+	}
+	if len(page2.Links) != 0 {
+		t.Errorf("page2 has %d links, want 0", len(page2.Links))
+	}
+}
+
+func TestCoordinator_JSONOutputWithError(t *testing.T) {
+	output := &bytes.Buffer{}
+	fetcher := &mockFetcher{
+		responses: map[string][]byte{
+			"https://example.com/": []byte("<html>page</html>"),
+		},
+		errors: map[string]error{
+			"https://example.com/error": errors.New("fetch failed"),
+		},
+	}
+	parser := &mockParser{
+		links: []string{"/error"},
+	}
+
+	cfg := Config{
+		StartURL:     "https://example.com/",
+		NumWorkers:   1,
+		Fetcher:      fetcher,
+		Parser:       parser,
+		Output:       output,
+		OutputFormat: "json",
+	}
+
+	coord, err := NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator() error = %v", err)
+	}
+
+	err = coord.Crawl(context.Background())
+	if err != nil {
+		t.Fatalf("Crawl() error = %v", err)
+	}
+
+	// Parse JSON output
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 JSON lines, got %d", len(lines))
+	}
+
+	// Check error page
+	var errorPage PageResult
+	if err := json.Unmarshal([]byte(lines[1]), &errorPage); err != nil {
+		t.Fatalf("failed to parse JSON line 2: %v", err)
+	}
+
+	if errorPage.URL != "https://example.com/error" {
+		t.Errorf("errorPage.URL = %q, want %q", errorPage.URL, "https://example.com/error")
+	}
+	if len(errorPage.Links) != 0 {
+		t.Errorf("errorPage has %d links, want 0 (empty array)", len(errorPage.Links))
+	}
+	if errorPage.Error == "" {
+		t.Errorf("errorPage.Error is empty, want error message")
+	}
+	if !strings.Contains(errorPage.Error, "fetch failed") {
+		t.Errorf("errorPage.Error = %q, want to contain 'fetch failed'", errorPage.Error)
 	}
 }

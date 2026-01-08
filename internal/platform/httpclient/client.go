@@ -101,7 +101,10 @@ func (c *Client) Fetch(ctx context.Context, url string) (*crawler.FetchResult, e
 
 	// Check status code
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("non-2xx status code: %d", resp.StatusCode)
+		return nil, &crawler.HTTPError{
+			StatusCode: resp.StatusCode,
+			URL:        url,
+		}
 	}
 
 	// Read body with size limit

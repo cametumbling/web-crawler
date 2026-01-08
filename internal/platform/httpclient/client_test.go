@@ -99,13 +99,14 @@ func TestFetch_CustomUserAgent(t *testing.T) {
 
 func TestFetch_Non2xxStatus(t *testing.T) {
 	tests := []struct {
-		name       string
-		statusCode int
+		name          string
+		statusCode    int
+		wantErrString string
 	}{
-		{"404 Not Found", http.StatusNotFound},
-		{"500 Internal Server Error", http.StatusInternalServerError},
-		{"403 Forbidden", http.StatusForbidden},
-		{"301 Moved Permanently", http.StatusMovedPermanently},
+		{"404 Not Found", http.StatusNotFound, "not found (404)"},
+		{"500 Internal Server Error", http.StatusInternalServerError, "server error (500)"},
+		{"403 Forbidden", http.StatusForbidden, "client error (403)"},
+		{"301 Moved Permanently", http.StatusMovedPermanently, "redirect not followed (301)"},
 	}
 
 	for _, tt := range tests {
@@ -120,8 +121,8 @@ func TestFetch_Non2xxStatus(t *testing.T) {
 			if err == nil {
 				t.Errorf("Fetch() expected error for status %d, got nil", tt.statusCode)
 			}
-			if !strings.Contains(err.Error(), "non-2xx status code") {
-				t.Errorf("Fetch() error = %v, want error containing 'non-2xx status code'", err)
+			if !strings.Contains(err.Error(), tt.wantErrString) {
+				t.Errorf("Fetch() error = %v, want error containing %q", err, tt.wantErrString)
 			}
 		})
 	}

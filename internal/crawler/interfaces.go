@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"fmt"
 	"io"
 )
 
@@ -49,4 +50,41 @@ type Parser interface {
 	// ExtractLinks parses HTML and returns all href attributes from <a> tags.
 	// Returns raw href strings exactly as they appear in the HTML.
 	ExtractLinks(r io.Reader) ([]string, error)
+}
+
+// HTTPError represents an HTTP error with status code information.
+type HTTPError struct {
+	StatusCode int
+	URL        string
+}
+
+func (e *HTTPError) Error() string {
+	var msg string
+	switch {
+	case e.StatusCode == 404:
+		msg = "not found (404)"
+	case e.StatusCode >= 500 && e.StatusCode < 600:
+		msg =  fmt.Sprintf("server error (%d)", e.StatusCode)
+	case e.StatusCode >= 400 && e.StatusCode < 500:
+		msg =  fmt.Sprintf("client error (%d)", e.StatusCode)
+	case e.StatusCode >= 300 && e.StatusCode < 400:
+		msg =  fmt.Sprintf("redirect not followed (%d)", e.StatusCode)
+	default:
+		msg =  fmt.Sprintf("HTTP error (%d)", e.StatusCode)
+	}
+	return fmt.Sprintf("%s: %s", e.URL, msg)
+}
+
+// Category returns a human-readable error category.
+func (e *HTTPError) Category() string {
+	switch {
+	case e.StatusCode == 404:
+		return "dead link"
+	case e.StatusCode == 408 || e.StatusCode == 504:
+		return "timeout"
+	case e.StatusCode >= 500 && e.StatusCode < 600:
+		return "server error (retry-able)"
+	default:
+		return "http error"
+	}
 }

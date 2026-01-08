@@ -57,8 +57,14 @@ func processWorkItem(ctx context.Context, item WorkItem, fetcher Fetcher, parser
 	// Fetch the URL
 	fetchResult, err := fetcher.Fetch(ctx, item.URL)
 	if err != nil {
-		// Log fetch error to stderr
-		log.Printf("Failed to fetch %s: %v", item.URL, err)
+		// Log fetch error to stderr with categorization
+		if httpErr, ok := err.(*HTTPError); ok {
+			log.Printf("Failed to fetch %s: %s [%s]", item.URL, httpErr.Error(), httpErr.Category())
+		} else if ctx.Err() != nil {
+			log.Printf("Failed to fetch %s: context cancelled", item.URL)
+		} else {
+			log.Printf("Failed to fetch %s: %v [network error]", item.URL, err)
+		}
 		return Result{
 			URL:      item.URL,
 			FinalURL: item.URL, // Use original URL as fallback
