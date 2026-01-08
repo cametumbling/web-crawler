@@ -277,3 +277,137 @@ func TestWorker_AlwaysSendsOneResultPerItem(t *testing.T) {
 		t.Errorf("received %d results, want 2", count)
 	}
 }
+
+// panicFetcher is a Fetcher that always panics
+type panicFetcher struct{}
+
+func (p *panicFetcher) Fetch(url string) ([]byte, error) {
+	panic("fetcher panic!")
+}
+
+func TestWorker_RecoverFromFetcherPanic(t *testing.T) {
+	// Test that worker recovers from fetcher panic and sends error Result
+	fetcher := &panicFetcher{}
+	parser := &mockParser{links: []string{}}
+
+	workCh := make(chan WorkItem, 1)
+	resultsCh := make(chan Result, 1)
+
+	// Start worker
+	go worker(workCh, resultsCh, fetcher, parser)
+
+	// Send work item that will cause panic
+	workCh <- WorkItem{URL: "https://example.com/panic"}
+	close(workCh)
+
+	// Should receive exactly one Result with error
+	result := <-resultsCh
+
+	if result.URL != "https://example.com/panic" {
+		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/panic")
+	}
+	if result.Err == nil {
+		t.Error("Result.Err = nil, want error from panic")
+	}
+	if result.Links != nil {
+		t.Errorf("Result.Links = %v, want nil", result.Links)
+	}
+}
+
+func TestWorker_RecoverFromParserPanic(t *testing.T) {
+	// Test that worker recovers from parser panic and sends error Result
+	fetcher := &mockFetcher{
+		responses: map[string][]byte{
+			"https://example.com/page": []byte("<html>test</html>"),
+		},
+	}
+
+	parser := &mockParser{
+		fn: func(r io.Reader) ([]string, error) {
+			panic("parser panic!")
+		},
+	}
+
+	workCh := make(chan WorkItem, 1)
+	resultsCh := make(chan Result, 1)
+
+	// Start worker
+	go worker(workCh, resultsCh, fetcher, parser)
+
+	// Send work item that will cause parser to panic
+	workCh <- WorkItem{URL: "https://example.com/page"}
+	close(workCh)
+
+	// Should receive exactly one Result with error
+	result := <-resultsCh
+
+	if result.URL != "https://example.com/page" {
+		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/page")
+	}
+	if result.Err == nil {
+		t.Error("Result.Err = nil, want error from panic")
+	}
+	if result.Links != nil {
+		t.Errorf("Result.Links = %v, want nil", result.Links)
+	}
+}
+
+func TestWorker_ContinuesAfterPanic(t *testing.T) {
+	// Test that worker continues processing after recovering from panic
+	callCount := 0
+	fetcher := &mockFetcher{
+		responses: map[string][]byte{
+			"https://example.com/page1": []byte("<html>page1</html>"),
+			"https://example.com/page2": []byte("<html>page2</html>"),
+			"https://example.com/page3": []byte("<html>page3</html>"),
+		},
+	}
+
+	parser := &mockParser{
+		fn: func(r io.Reader) ([]string, error) {
+			callCount++
+			if callCount == 2 {
+				// Second call panics
+				panic("parser panic on second call!")
+			}
+			return []string{"/link"}, nil
+		},
+	}
+
+	workCh := make(chan WorkItem, 3)
+	resultsCh := make(chan Result, 3)
+
+	// Start worker
+	go worker(workCh, resultsCh, fetcher, parser)
+
+	// Send 3 work items (second one will panic)
+	workCh <- WorkItem{URL: "https://example.com/page1"}
+	workCh <- WorkItem{URL: "https://example.com/page2"}
+	workCh <- WorkItem{URL: "https://example.com/page3"}
+	close(workCh)
+
+	// Should receive exactly 3 results
+	results := make([]Result, 0, 3)
+	for i := 0; i < 3; i++ {
+		results = append(results, <-resultsCh)
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("got %d results, want 3", len(results))
+	}
+
+	// First result should succeed
+	if results[0].Err != nil {
+		t.Errorf("result 0 has error: %v", results[0].Err)
+	}
+
+	// Second result should have panic error
+	if results[1].Err == nil {
+		t.Error("result 1 should have panic error")
+	}
+
+	// Third result should succeed (worker recovered and continued)
+	if results[2].Err != nil {
+		t.Errorf("result 2 has error (worker didn't recover): %v", results[2].Err)
+	}
+}
