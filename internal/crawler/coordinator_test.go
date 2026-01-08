@@ -463,7 +463,8 @@ func TestCoordinator_JSONOutput(t *testing.T) {
 			body := make([]byte, 1024)
 			n, _ := r.Read(body)
 			if strings.Contains(string(body[:n]), "page1") {
-				return []string{"/page2", "/external"}, nil
+				// /page2 is in-scope, https://other.com/external is out of scope
+				return []string{"/page2", "https://other.com/external"}, nil
 			}
 			return []string{}, nil
 		},

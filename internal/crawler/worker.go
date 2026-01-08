@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -53,23 +52,16 @@ func worker(ctx context.Context, workCh <-chan WorkItem, resultsCh chan<- Result
 
 // processWorkItem handles the fetch and parse for a single WorkItem.
 // Always returns a Result, even on error.
+// Worker is stateless - it does NOT log. Logging is done by the coordinator.
 func processWorkItem(ctx context.Context, item WorkItem, fetcher Fetcher, parser Parser) Result {
 	// Fetch the URL
 	fetchResult, err := fetcher.Fetch(ctx, item.URL)
 	if err != nil {
-		// Log fetch error to stderr with categorization
-		if httpErr, ok := err.(*HTTPError); ok {
-			log.Printf("Failed to fetch %s: %s [%s]", item.URL, httpErr.Error(), httpErr.Category())
-		} else if ctx.Err() != nil {
-			log.Printf("Failed to fetch %s: context cancelled", item.URL)
-		} else {
-			log.Printf("Failed to fetch %s: %v [network error]", item.URL, err)
-		}
 		return Result{
 			URL:      item.URL,
 			FinalURL: item.URL, // Use original URL as fallback
 			Links:    nil,
-			Err:      fmt.Errorf("fetch failed: %w", err),
+			Err:      err, // Return raw error - coordinator will wrap/log
 		}
 	}
 
@@ -91,7 +83,7 @@ func processWorkItem(ctx context.Context, item WorkItem, fetcher Fetcher, parser
 			URL:      item.URL,
 			FinalURL: fetchResult.FinalURL,
 			Links:    nil,
-			Err:      fmt.Errorf("parse failed: %w", err),
+			Err:      err, // Return raw error - coordinator will log
 		}
 	}
 

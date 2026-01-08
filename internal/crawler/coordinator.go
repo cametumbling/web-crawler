@@ -98,9 +98,17 @@ func NewCoordinator(cfg Config) (*Coordinator, error) {
 		outputFormat = "text"
 	}
 
+	// Buffer workCh to avoid deadlock when coordinator enqueues multiple URLs
+	// before workers can pick them up. Buffer size is generous to handle
+	// pages with many links.
+	bufferSize := cfg.NumWorkers * 100
+	if bufferSize < 100 {
+		bufferSize = 100
+	}
+
 	return &Coordinator{
 		visited:      make(map[string]bool),
-		workCh:       make(chan WorkItem),
+		workCh:       make(chan WorkItem, bufferSize),
 		resultsCh:    make(chan Result),
 		fetcher:      cfg.Fetcher,
 		parser:       cfg.Parser,
@@ -201,8 +209,9 @@ func (c *Coordinator) processResult(ctx context.Context, result Result) {
 	// Print the page (even on error)
 	c.printResult(result)
 
-	// If there was an error, we still call wg.Done() but don't enqueue new work
+	// If there was an error, log it and don't enqueue new work
 	if result.Err != nil {
+		c.logError(result.URL, result.Err)
 		c.errorCount++
 		c.wg.Done()
 		return
@@ -328,5 +337,15 @@ func (c *Coordinator) printResult(result Result) {
 		for _, link := range sanitized {
 			fmt.Fprintf(c.output, "%s\n", link)
 		}
+	}
+}
+
+// logError logs an error to stderr with appropriate categorization.
+// All logging is done by the coordinator, not by workers.
+func (c *Coordinator) logError(url string, err error) {
+	if httpErr, ok := err.(*HTTPError); ok {
+		log.Printf("Failed to fetch %s: %s [%s]", url, httpErr.Error(), httpErr.Category())
+	} else {
+		log.Printf("Failed to fetch %s: %v", url, err)
 	}
 }

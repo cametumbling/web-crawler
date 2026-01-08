@@ -59,20 +59,18 @@ type HTTPError struct {
 }
 
 func (e *HTTPError) Error() string {
-	var msg string
 	switch {
 	case e.StatusCode == 404:
-		msg = "not found (404)"
+		return "not found (404)"
 	case e.StatusCode >= 500 && e.StatusCode < 600:
-		msg =  fmt.Sprintf("server error (%d)", e.StatusCode)
+		return fmt.Sprintf("server error (%d)", e.StatusCode)
 	case e.StatusCode >= 400 && e.StatusCode < 500:
-		msg =  fmt.Sprintf("client error (%d)", e.StatusCode)
+		return fmt.Sprintf("client error (%d)", e.StatusCode)
 	case e.StatusCode >= 300 && e.StatusCode < 400:
-		msg =  fmt.Sprintf("redirect not followed (%d)", e.StatusCode)
+		return fmt.Sprintf("redirect not followed (%d)", e.StatusCode)
 	default:
-		msg =  fmt.Sprintf("HTTP error (%d)", e.StatusCode)
+		return fmt.Sprintf("HTTP error (%d)", e.StatusCode)
 	}
-	return fmt.Sprintf("%s: %s", e.URL, msg)
 }
 
 // Category returns a human-readable error category.
