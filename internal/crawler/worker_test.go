@@ -8,16 +8,30 @@ import (
 
 // mockFetcher is a mock implementation of the Fetcher interface for testing.
 type mockFetcher struct {
-	responses map[string][]byte
-	errors    map[string]error
+	responses    map[string][]byte
+	errors       map[string]error
+	contentTypes map[string]string // Optional content types per URL
+	finalURLs    map[string]string // Optional redirected URLs
 }
 
-func (m *mockFetcher) Fetch(url string) ([]byte, error) {
+func (m *mockFetcher) Fetch(url string) (*FetchResult, error) {
 	if err, ok := m.errors[url]; ok {
 		return nil, err
 	}
 	if body, ok := m.responses[url]; ok {
-		return body, nil
+		finalURL := url
+		if fu, ok := m.finalURLs[url]; ok {
+			finalURL = fu
+		}
+		contentType := "text/html"
+		if ct, ok := m.contentTypes[url]; ok {
+			contentType = ct
+		}
+		return &FetchResult{
+			Body:        body,
+			FinalURL:    finalURL,
+			ContentType: contentType,
+		}, nil
 	}
 	return nil, errors.New("url not found in mock")
 }
@@ -281,7 +295,7 @@ func TestWorker_AlwaysSendsOneResultPerItem(t *testing.T) {
 // panicFetcher is a Fetcher that always panics
 type panicFetcher struct{}
 
-func (p *panicFetcher) Fetch(url string) ([]byte, error) {
+func (p *panicFetcher) Fetch(url string) (*FetchResult, error) {
 	panic("fetcher panic!")
 }
 
@@ -409,5 +423,122 @@ func TestWorker_ContinuesAfterPanic(t *testing.T) {
 	// Third result should succeed (worker recovered and continued)
 	if results[2].Err != nil {
 		t.Errorf("result 2 has error (worker didn't recover): %v", results[2].Err)
+	}
+}
+
+func TestProcessWorkItem_HandlesRedirect(t *testing.T) {
+	// Test that redirected URL is captured as FinalURL
+	fetcher := &mockFetcher{
+		responses: map[string][]byte{
+			"https://example.com/old": []byte("<html><body><a href='/new-link'>Link</a></body></html>"),
+		},
+		finalURLs: map[string]string{
+			"https://example.com/old": "https://example.com/new",
+		},
+	}
+	parser := &mockParser{
+		links: []string{"/new-link"},
+	}
+
+	item := WorkItem{URL: "https://example.com/old"}
+	result := processWorkItem(item, fetcher, parser)
+
+	if result.URL != "https://example.com/old" {
+		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/old")
+	}
+	if result.FinalURL != "https://example.com/new" {
+		t.Errorf("Result.FinalURL = %q, want %q", result.FinalURL, "https://example.com/new")
+	}
+	if result.Err != nil {
+		t.Errorf("Result.Err = %v, want nil", result.Err)
+	}
+	if len(result.Links) != 1 || result.Links[0] != "/new-link" {
+		t.Errorf("Result.Links = %v, want [/new-link]", result.Links)
+	}
+}
+
+func TestProcessWorkItem_NonHTMLContent(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{"PDF", "application/pdf"},
+		{"JPEG", "image/jpeg"},
+		{"PNG", "image/png"},
+		{"JSON", "application/json"},
+		{"Plain text", "text/plain"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := &mockFetcher{
+				responses: map[string][]byte{
+					"https://example.com/file": []byte("binary data or whatever"),
+				},
+				contentTypes: map[string]string{
+					"https://example.com/file": tt.contentType,
+				},
+			}
+			parser := &mockParser{
+				links: []string{"/should-not-be-called"},
+			}
+
+			item := WorkItem{URL: "https://example.com/file"}
+			result := processWorkItem(item, fetcher, parser)
+
+			if result.URL != "https://example.com/file" {
+				t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/file")
+			}
+			if result.FinalURL != "https://example.com/file" {
+				t.Errorf("Result.FinalURL = %q, want %q", result.FinalURL, "https://example.com/file")
+			}
+			if result.Err != nil {
+				t.Errorf("Result.Err = %v, want nil (non-HTML is not an error)", result.Err)
+			}
+			if result.Links == nil {
+				t.Error("Result.Links = nil, want empty slice")
+			}
+			if len(result.Links) != 0 {
+				t.Errorf("len(Result.Links) = %d, want 0", len(result.Links))
+			}
+		})
+	}
+}
+
+func TestProcessWorkItem_HTMLContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{"text/html", "text/html"},
+		{"text/html with charset", "text/html; charset=utf-8"},
+		{"text/html with uppercase", "TEXT/HTML"},
+		{"empty (assume HTML)", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := &mockFetcher{
+				responses: map[string][]byte{
+					"https://example.com/page": []byte("<html><body><a href='/link'>Link</a></body></html>"),
+				},
+				contentTypes: map[string]string{
+					"https://example.com/page": tt.contentType,
+				},
+			}
+			parser := &mockParser{
+				links: []string{"/link"},
+			}
+
+			item := WorkItem{URL: "https://example.com/page"}
+			result := processWorkItem(item, fetcher, parser)
+
+			if result.Err != nil {
+				t.Errorf("Result.Err = %v, want nil", result.Err)
+			}
+			if len(result.Links) != 1 {
+				t.Errorf("len(Result.Links) = %d, want 1", len(result.Links))
+			}
+		})
 	}
 }

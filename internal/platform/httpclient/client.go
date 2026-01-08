@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/cametumbling/web-crawler/internal/crawler"
 )
 
 const (
@@ -66,9 +68,9 @@ func New(cfg Config) *Client {
 }
 
 // Fetch retrieves the content from the given URL.
-// Returns the response body as a byte slice and any error encountered.
+// Returns the fetch result (with final URL and content-type) and any error encountered.
 // Applies rate limiting, sets User-Agent, and enforces body size limits.
-func (c *Client) Fetch(url string) ([]byte, error) {
+func (c *Client) Fetch(url string) (*crawler.FetchResult, error) {
 	// Apply rate limiting if configured
 	if c.rateLimiter != nil {
 		<-c.rateLimiter
@@ -102,5 +104,15 @@ func (c *Client) Fetch(url string) ([]byte, error) {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	return body, nil
+	// Get final URL after redirects
+	finalURL := resp.Request.URL.String()
+
+	// Get Content-Type header
+	contentType := resp.Header.Get("Content-Type")
+
+	return &crawler.FetchResult{
+		Body:        body,
+		FinalURL:    finalURL,
+		ContentType: contentType,
+	}, nil
 }

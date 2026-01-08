@@ -61,13 +61,13 @@ func TestFetch_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{})
-	body, err := c.Fetch(server.URL)
+	result, err := c.Fetch(server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
 
-	if string(body) != expectedBody {
-		t.Errorf("Fetch() body = %q, want %q", string(body), expectedBody)
+	if string(result.Body) != expectedBody {
+		t.Errorf("Fetch() body = %q, want %q", string(result.Body), expectedBody)
 	}
 
 	if expectedUA != DefaultUserAgent {
@@ -138,14 +138,14 @@ func TestFetch_BodySizeLimit(t *testing.T) {
 
 	// Set a small body size limit
 	c := New(Config{MaxBodySize: 1000})
-	body, err := c.Fetch(server.URL)
+	result, err := c.Fetch(server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
 
 	// Should only read up to the limit
-	if len(body) != 1000 {
-		t.Errorf("Fetch() body size = %d, want %d (limit)", len(body), 1000)
+	if len(result.Body) != 1000 {
+		t.Errorf("Fetch() body size = %d, want %d (limit)", len(result.Body), 1000)
 	}
 }
 
@@ -242,12 +242,12 @@ func TestFetch_EmptyBody(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{})
-	body, err := c.Fetch(server.URL)
+	result, err := c.Fetch(server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
 
-	if len(body) != 0 {
-		t.Errorf("Fetch() body length = %d, want 0", len(body))
+	if len(result.Body) != 0 {
+		t.Errorf("Fetch() body length = %d, want 0", len(result.Body))
 	}
 }

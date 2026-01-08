@@ -3,6 +3,7 @@ package crawler
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
 
 // worker is a stateless goroutine that processes WorkItems from workCh.
@@ -41,29 +42,54 @@ func worker(workCh <-chan WorkItem, resultsCh chan<- Result, fetcher Fetcher, pa
 // Always returns a Result, even on error.
 func processWorkItem(item WorkItem, fetcher Fetcher, parser Parser) Result {
 	// Fetch the URL
-	body, err := fetcher.Fetch(item.URL)
+	fetchResult, err := fetcher.Fetch(item.URL)
 	if err != nil {
 		return Result{
-			URL:   item.URL,
-			Links: nil,
-			Err:   fmt.Errorf("fetch failed: %w", err),
+			URL:      item.URL,
+			FinalURL: item.URL, // Use original URL as fallback
+			Links:    nil,
+			Err:      fmt.Errorf("fetch failed: %w", err),
+		}
+	}
+
+	// Check if content is HTML
+	if !isHTML(fetchResult.ContentType) {
+		// Non-HTML content: return empty links (not an error)
+		return Result{
+			URL:      item.URL,
+			FinalURL: fetchResult.FinalURL,
+			Links:    []string{}, // Empty, not nil
+			Err:      nil,
 		}
 	}
 
 	// Parse the HTML to extract links
-	links, err := parser.ExtractLinks(bytes.NewReader(body))
+	links, err := parser.ExtractLinks(bytes.NewReader(fetchResult.Body))
 	if err != nil {
 		return Result{
-			URL:   item.URL,
-			Links: nil,
-			Err:   fmt.Errorf("parse failed: %w", err),
+			URL:      item.URL,
+			FinalURL: fetchResult.FinalURL,
+			Links:    nil,
+			Err:      fmt.Errorf("parse failed: %w", err),
 		}
 	}
 
 	// Success
 	return Result{
-		URL:   item.URL,
-		Links: links,
-		Err:   nil,
+		URL:      item.URL,
+		FinalURL: fetchResult.FinalURL,
+		Links:    links,
+		Err:      nil,
 	}
+}
+
+// isHTML returns true if the Content-Type header indicates HTML content.
+func isHTML(contentType string) bool {
+	// Content-Type might be "text/html; charset=utf-8" or just "text/html"
+	// Also handle empty content type (assume HTML)
+	if contentType == "" {
+		return true // Assume HTML if no Content-Type
+	}
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return ct == "text/html"
 }

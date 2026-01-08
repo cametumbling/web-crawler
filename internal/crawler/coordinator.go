@@ -168,8 +168,8 @@ func (c *Coordinator) processResult(result Result) {
 		return
 	}
 
-	// Sanitize all links
-	sanitized := c.sanitizeLinks(result.Links, result.URL)
+	// Sanitize all links (use FinalURL for base URL resolution after redirects)
+	sanitized := c.sanitizeLinks(result.Links, result.FinalURL)
 
 	// For each sanitized link, check scope and visited
 	for _, link := range sanitized {
@@ -223,7 +223,8 @@ func (c *Coordinator) sanitizeLinks(rawHrefs []string, pageURL string) []string 
 
 // printResult prints the result to stdout in the required format.
 func (c *Coordinator) printResult(result Result) {
-	fmt.Fprintf(c.output, "Visited: %s\n", result.URL)
+	// Print the final URL (after following redirects)
+	fmt.Fprintf(c.output, "Visited: %s\n", result.FinalURL)
 	fmt.Fprintf(c.output, "Links found:\n")
 
 	if result.Err != nil {
@@ -232,7 +233,8 @@ func (c *Coordinator) printResult(result Result) {
 	}
 
 	// Sanitize and print all links found (not just in-scope ones)
-	sanitized := c.sanitizeLinks(result.Links, result.URL)
+	// Use FinalURL for base URL resolution
+	sanitized := c.sanitizeLinks(result.Links, result.FinalURL)
 	for _, link := range sanitized {
 		fmt.Fprintf(c.output, "%s\n", link)
 	}

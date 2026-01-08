@@ -11,20 +11,32 @@ type WorkItem struct {
 // Result represents the outcome of processing a single WorkItem.
 // Workers must send exactly one Result per WorkItem, even on error.
 type Result struct {
-	// URL is the page URL that was fetched (same as WorkItem.URL)
+	// URL is the original requested URL (same as WorkItem.URL)
 	URL string
+	// FinalURL is the URL after following redirects (use this for base URL resolution)
+	FinalURL string
 	// Links contains the raw href strings extracted from the HTML
 	Links []string
 	// Err is any error that occurred during fetch or parse (nil on success)
 	Err error
 }
 
+// FetchResult contains the result of an HTTP fetch operation.
+type FetchResult struct {
+	// Body is the response body content
+	Body []byte
+	// FinalURL is the URL after following redirects
+	FinalURL string
+	// ContentType is the Content-Type header value
+	ContentType string
+}
+
 // Fetcher is the interface for fetching HTTP content.
 // This abstraction allows for testing with mock implementations.
 type Fetcher interface {
 	// Fetch retrieves the content from the given URL.
-	// Returns the response body and any error encountered.
-	Fetch(url string) ([]byte, error)
+	// Returns the fetch result (with final URL and content-type) and any error encountered.
+	Fetch(url string) (*FetchResult, error)
 }
 
 // Parser is the interface for parsing HTML and extracting links.
