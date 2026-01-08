@@ -1,6 +1,9 @@
 package crawler
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 // WorkItem represents a single URL to be fetched and parsed by a worker.
 type WorkItem struct {
@@ -36,7 +39,8 @@ type FetchResult struct {
 type Fetcher interface {
 	// Fetch retrieves the content from the given URL.
 	// Returns the fetch result (with final URL and content-type) and any error encountered.
-	Fetch(url string) (*FetchResult, error)
+	// The context can be used for cancellation and timeouts.
+	Fetch(ctx context.Context, url string) (*FetchResult, error)
 }
 
 // Parser is the interface for parsing HTML and extracting links.

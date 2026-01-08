@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/cametumbling/web-crawler/internal/crawler"
@@ -69,10 +73,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run the crawl
-	if err := coord.Crawl(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error during crawl: %v\n", err)
-		os.Exit(1)
+	// Set up context with cancellation for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handling for SIGINT (Ctrl+C)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	// Start crawl in a goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- coord.Crawl(ctx)
+	}()
+
+	// Wait for either completion or interrupt
+	select {
+	case err := <-errCh:
+		// Crawl completed normally
+		if err != nil && err != context.Canceled {
+			fmt.Fprintf(os.Stderr, "Error during crawl: %v\n", err)
+			os.Exit(1)
+		}
+	case sig := <-sigCh:
+		// Signal received - initiate graceful shutdown
+		log.Printf("\nReceived signal %v, shutting down gracefully...", sig)
+		cancel() // Cancel context to stop workers and coordinator
+
+		// Wait for crawl to finish with a timeout
+		select {
+		case err := <-errCh:
+			if err != nil && err != context.Canceled {
+				fmt.Fprintf(os.Stderr, "\nError during shutdown: %v\n", err)
+				os.Exit(1)
+			}
+			log.Println("Shutdown complete")
+		case <-time.After(5 * time.Second):
+			fmt.Fprintf(os.Stderr, "\nShutdown timeout exceeded, forcing exit\n")
+			os.Exit(1)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,14 +71,20 @@ func New(cfg Config) *Client {
 // Fetch retrieves the content from the given URL.
 // Returns the fetch result (with final URL and content-type) and any error encountered.
 // Applies rate limiting, sets User-Agent, and enforces body size limits.
-func (c *Client) Fetch(url string) (*crawler.FetchResult, error) {
+// Respects context cancellation.
+func (c *Client) Fetch(ctx context.Context, url string) (*crawler.FetchResult, error) {
 	// Apply rate limiting if configured
 	if c.rateLimiter != nil {
-		<-c.rateLimiter
+		select {
+		case <-c.rateLimiter:
+			// Rate limit satisfied, continue
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
-	// Create request
-	req, err := http.NewRequest("GET", url, nil)
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

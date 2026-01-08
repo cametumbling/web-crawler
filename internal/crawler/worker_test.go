@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -14,7 +15,7 @@ type mockFetcher struct {
 	finalURLs    map[string]string // Optional redirected URLs
 }
 
-func (m *mockFetcher) Fetch(url string) (*FetchResult, error) {
+func (m *mockFetcher) Fetch(ctx context.Context, url string) (*FetchResult, error) {
 	if err, ok := m.errors[url]; ok {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func TestProcessWorkItem_Success(t *testing.T) {
 	}
 
 	item := WorkItem{URL: "https://example.com/page"}
-	result := processWorkItem(item, fetcher, parser)
+	result := processWorkItem(context.Background(), item, fetcher, parser)
 
 	if result.URL != "https://example.com/page" {
 		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/page")
@@ -92,7 +93,7 @@ func TestProcessWorkItem_FetchError(t *testing.T) {
 	}
 
 	item := WorkItem{URL: "https://example.com/error"}
-	result := processWorkItem(item, fetcher, parser)
+	result := processWorkItem(context.Background(), item, fetcher, parser)
 
 	if result.URL != "https://example.com/error" {
 		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/error")
@@ -116,7 +117,7 @@ func TestProcessWorkItem_ParseError(t *testing.T) {
 	}
 
 	item := WorkItem{URL: "https://example.com/page"}
-	result := processWorkItem(item, fetcher, parser)
+	result := processWorkItem(context.Background(), item, fetcher, parser)
 
 	if result.URL != "https://example.com/page" {
 		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/page")
@@ -140,7 +141,7 @@ func TestProcessWorkItem_EmptyLinks(t *testing.T) {
 	}
 
 	item := WorkItem{URL: "https://example.com/page"}
-	result := processWorkItem(item, fetcher, parser)
+	result := processWorkItem(context.Background(), item, fetcher, parser)
 
 	if result.URL != "https://example.com/page" {
 		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/page")
@@ -149,7 +150,7 @@ func TestProcessWorkItem_EmptyLinks(t *testing.T) {
 		t.Errorf("Result.Err = %v, want nil", result.Err)
 	}
 	if len(result.Links) != 0 {
-		t.Errorf("len(Result.Links) = %d, want 0", len(result.Links))
+		t.Errorf("len(result.Links) = %d, want 0", len(result.Links))
 	}
 }
 
@@ -169,7 +170,7 @@ func TestWorker_ProcessesMultipleItems(t *testing.T) {
 	resultsCh := make(chan Result, 3)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send work items
 	workCh <- WorkItem{URL: "https://example.com/page1"}
@@ -225,7 +226,7 @@ func TestWorker_MixedSuccessAndErrors(t *testing.T) {
 	resultsCh := make(chan Result, 2)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send work items
 	workCh <- WorkItem{URL: "https://example.com/success"}
@@ -270,7 +271,7 @@ func TestWorker_AlwaysSendsOneResultPerItem(t *testing.T) {
 	resultsCh := make(chan Result, 2)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send work items that will fail
 	workCh <- WorkItem{URL: "https://example.com/error1"}
@@ -295,7 +296,7 @@ func TestWorker_AlwaysSendsOneResultPerItem(t *testing.T) {
 // panicFetcher is a Fetcher that always panics
 type panicFetcher struct{}
 
-func (p *panicFetcher) Fetch(url string) (*FetchResult, error) {
+func (p *panicFetcher) Fetch(ctx context.Context, url string) (*FetchResult, error) {
 	panic("fetcher panic!")
 }
 
@@ -308,7 +309,7 @@ func TestWorker_RecoverFromFetcherPanic(t *testing.T) {
 	resultsCh := make(chan Result, 1)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send work item that will cause panic
 	workCh <- WorkItem{URL: "https://example.com/panic"}
@@ -346,7 +347,7 @@ func TestWorker_RecoverFromParserPanic(t *testing.T) {
 	resultsCh := make(chan Result, 1)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send work item that will cause parser to panic
 	workCh <- WorkItem{URL: "https://example.com/page"}
@@ -392,7 +393,7 @@ func TestWorker_ContinuesAfterPanic(t *testing.T) {
 	resultsCh := make(chan Result, 3)
 
 	// Start worker
-	go worker(workCh, resultsCh, fetcher, parser)
+	go worker(context.Background(), workCh, resultsCh, fetcher, parser)
 
 	// Send 3 work items (second one will panic)
 	workCh <- WorkItem{URL: "https://example.com/page1"}
@@ -441,7 +442,7 @@ func TestProcessWorkItem_HandlesRedirect(t *testing.T) {
 	}
 
 	item := WorkItem{URL: "https://example.com/old"}
-	result := processWorkItem(item, fetcher, parser)
+	result := processWorkItem(context.Background(), item, fetcher, parser)
 
 	if result.URL != "https://example.com/old" {
 		t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/old")
@@ -484,7 +485,7 @@ func TestProcessWorkItem_NonHTMLContent(t *testing.T) {
 			}
 
 			item := WorkItem{URL: "https://example.com/file"}
-			result := processWorkItem(item, fetcher, parser)
+			result := processWorkItem(context.Background(), item, fetcher, parser)
 
 			if result.URL != "https://example.com/file" {
 				t.Errorf("Result.URL = %q, want %q", result.URL, "https://example.com/file")
@@ -531,7 +532,7 @@ func TestProcessWorkItem_HTMLContentType(t *testing.T) {
 			}
 
 			item := WorkItem{URL: "https://example.com/page"}
-			result := processWorkItem(item, fetcher, parser)
+			result := processWorkItem(context.Background(), item, fetcher, parser)
 
 			if result.Err != nil {
 				t.Errorf("Result.Err = %v, want nil", result.Err)

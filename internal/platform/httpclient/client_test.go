@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -61,7 +62,7 @@ func TestFetch_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{})
-	result, err := c.Fetch(server.URL)
+	result, err := c.Fetch(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
@@ -86,7 +87,7 @@ func TestFetch_CustomUserAgent(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{UserAgent: expectedUA})
-	_, err := c.Fetch(server.URL)
+	_, err := c.Fetch(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
@@ -115,7 +116,7 @@ func TestFetch_Non2xxStatus(t *testing.T) {
 			defer server.Close()
 
 			c := New(Config{})
-			_, err := c.Fetch(server.URL)
+			_, err := c.Fetch(context.Background(), server.URL)
 			if err == nil {
 				t.Errorf("Fetch() expected error for status %d, got nil", tt.statusCode)
 			}
@@ -138,7 +139,7 @@ func TestFetch_BodySizeLimit(t *testing.T) {
 
 	// Set a small body size limit
 	c := New(Config{MaxBodySize: 1000})
-	result, err := c.Fetch(server.URL)
+	result, err := c.Fetch(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
@@ -159,7 +160,7 @@ func TestFetch_Timeout(t *testing.T) {
 
 	// Set a very short timeout
 	c := New(Config{Timeout: 50 * time.Millisecond})
-	_, err := c.Fetch(server.URL)
+	_, err := c.Fetch(context.Background(), server.URL)
 	if err == nil {
 		t.Errorf("Fetch() expected timeout error, got nil")
 	}
@@ -179,7 +180,7 @@ func TestFetch_RateLimit(t *testing.T) {
 
 	// Make 3 requests
 	for i := 0; i < 3; i++ {
-		_, err := c.Fetch(server.URL)
+		_, err := c.Fetch(context.Background(), server.URL)
 		if err != nil {
 			t.Fatalf("Fetch() error = %v", err)
 		}
@@ -201,7 +202,7 @@ func TestFetch_RateLimit(t *testing.T) {
 
 func TestFetch_InvalidURL(t *testing.T) {
 	c := New(Config{})
-	_, err := c.Fetch("://invalid-url")
+	_, err := c.Fetch(context.Background(), "://invalid-url")
 	if err == nil {
 		t.Errorf("Fetch() expected error for invalid URL, got nil")
 	}
@@ -226,7 +227,7 @@ func TestFetch_2xxStatusCodes(t *testing.T) {
 			defer server.Close()
 
 			c := New(Config{})
-			_, err := c.Fetch(server.URL)
+			_, err := c.Fetch(context.Background(), server.URL)
 			if err != nil {
 				t.Errorf("Fetch() unexpected error for status %d: %v", tt.statusCode, err)
 			}
@@ -242,7 +243,7 @@ func TestFetch_EmptyBody(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{})
-	result, err := c.Fetch(server.URL)
+	result, err := c.Fetch(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}

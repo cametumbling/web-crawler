@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -76,7 +77,7 @@ func TestCoordinator_SinglePage(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -127,7 +128,7 @@ func TestCoordinator_FollowsInScopeLinks(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -177,7 +178,7 @@ func TestCoordinator_DeduplicatesURLs(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -241,7 +242,7 @@ func TestCoordinator_RespectsScope(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -308,7 +309,7 @@ func TestCoordinator_RespectsMaxPages(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -342,7 +343,7 @@ func TestCoordinator_HandlesErrors(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -396,7 +397,7 @@ func TestCoordinator_ConcurrentWorkers(t *testing.T) {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}
@@ -436,7 +437,7 @@ func TestCoordinator_NormalizesStartURL(t *testing.T) {
 		t.Errorf("startURL = %q, want %q", coord.startURL.String(), "https://example.com/")
 	}
 
-	err = coord.Crawl()
+	err = coord.Crawl(context.Background())
 	if err != nil {
 		t.Fatalf("Crawl() error = %v", err)
 	}

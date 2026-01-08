@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/url"
@@ -98,7 +99,8 @@ func NewCoordinator(cfg Config) (*Coordinator, error) {
 }
 
 // Crawl starts the crawl and blocks until completion.
-func (c *Coordinator) Crawl() error {
+// Respects context cancellation for graceful shutdown.
+func (c *Coordinator) Crawl(ctx context.Context) error {
 	// Track when workers exit so we can close resultsCh
 	var workerWg sync.WaitGroup
 
@@ -114,7 +116,7 @@ func (c *Coordinator) Crawl() error {
 		workerWg.Add(1)
 		go func() {
 			defer workerWg.Done()
-			worker(c.workCh, c.resultsCh, c.fetcher, c.parser)
+			worker(ctx, c.workCh, c.resultsCh, c.fetcher, c.parser)
 		}()
 	}
 
@@ -134,10 +136,17 @@ func (c *Coordinator) Crawl() error {
 
 	// Enqueue the first work item
 	// wg.Add(1) was already called above
-	c.workCh <- WorkItem{URL: c.startURL.String()}
+	select {
+	case c.workCh <- WorkItem{URL: c.startURL.String()}:
+		// Successfully enqueued
+	case <-ctx.Done():
+		// Context cancelled before we could start
+		c.wg.Done()
+		return ctx.Err()
+	}
 
 	// Process results until all workers are done
-	c.processResults()
+	c.processResults(ctx)
 
 	return nil
 }
@@ -150,15 +159,17 @@ func (c *Coordinator) Crawl() error {
 // 4. Calls wg.Done()
 //
 // This blocks until resultsCh is closed (which happens after all workers exit).
-func (c *Coordinator) processResults() {
+// Respects context cancellation and stops scheduling new work when cancelled.
+func (c *Coordinator) processResults(ctx context.Context) {
 	for result := range c.resultsCh {
-		c.processResult(result)
+		c.processResult(ctx, result)
 	}
 }
 
 // processResult handles a single result from a worker.
 // This is where the termination invariant is enforced.
-func (c *Coordinator) processResult(result Result) {
+// Stops scheduling new work if context is cancelled.
+func (c *Coordinator) processResult(ctx context.Context, result Result) {
 	// Print the page (even on error)
 	c.printResult(result)
 
@@ -168,11 +179,31 @@ func (c *Coordinator) processResult(result Result) {
 		return
 	}
 
+	// Check if context is cancelled - don't schedule new work
+	select {
+	case <-ctx.Done():
+		// Context cancelled - stop scheduling new work
+		c.wg.Done()
+		return
+	default:
+		// Continue processing
+	}
+
 	// Sanitize all links (use FinalURL for base URL resolution after redirects)
 	sanitized := c.sanitizeLinks(result.Links, result.FinalURL)
 
 	// For each sanitized link, check scope and visited
 	for _, link := range sanitized {
+		// Check if context is cancelled before enqueueing each link
+		select {
+		case <-ctx.Done():
+			// Context cancelled - stop scheduling new work
+			c.wg.Done()
+			return
+		default:
+			// Continue
+		}
+
 		// Check if in scope
 		if !InScope(link, c.startHost) {
 			continue
