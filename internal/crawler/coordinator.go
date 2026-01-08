@@ -206,8 +206,16 @@ func (c *Coordinator) processResults(ctx context.Context) {
 // This is where the termination invariant is enforced.
 // Stops scheduling new work if context is cancelled.
 func (c *Coordinator) processResult(ctx context.Context, result Result) {
-	// Print the page (even on error)
-	c.printResult(result)
+	// Handle redirects: if FinalURL differs from URL and FinalURL was already
+	// visited (via a direct link), skip printing to avoid duplicates.
+	// We still process the result and call wg.Done() to maintain invariant.
+	finalKey := Key(result.FinalURL)
+	alreadyPrinted := result.URL != result.FinalURL && c.visited[finalKey]
+
+	// Print the page (even on error), unless it's a redirect to an already-visited page
+	if !alreadyPrinted {
+		c.printResult(result)
+	}
 
 	// If there was an error, log it and don't enqueue new work
 	if result.Err != nil {
