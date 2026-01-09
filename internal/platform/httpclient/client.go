@@ -60,7 +60,7 @@ func New(cfg Config) *Client {
 		maxBodySize: cfg.MaxBodySize,
 	}
 
-	// Set up rate limiter if configured
+	// Set up rate limiter if configured -- time.Tick intentionally used over NewTicker - this is a CLI tool with a single rate limiter for the process lifetime; the "leak" is cleaned up on process exit
 	if cfg.RateLimit > 0 {
 		c.rateLimiter = time.Tick(cfg.RateLimit)
 	}

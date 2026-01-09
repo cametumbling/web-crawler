@@ -56,6 +56,46 @@ func TestNewCoordinator_ValidatesStartURL(t *testing.T) {
 	}
 }
 
+func TestNewCoordinator_ValidatesNumWorkers(t *testing.T) {
+	tests := []struct {
+		name       string
+		numWorkers int
+		wantError  bool
+	}{
+		{
+			name:       "positive workers accepted",
+			numWorkers: 1,
+			wantError:  false,
+		},
+		{
+			name:       "zero workers rejected",
+			numWorkers: 0,
+			wantError:  true,
+		},
+		{
+			name:       "negative workers rejected",
+			numWorkers: -1,
+			wantError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				StartURL:   "https://example.com/",
+				NumWorkers: tt.numWorkers,
+				Fetcher:    &mockFetcher{responses: make(map[string][]byte)},
+				Parser:     &mockParser{},
+			}
+
+			_, err := NewCoordinator(cfg)
+			if (err != nil) != tt.wantError {
+				t.Errorf("NewCoordinator() error = %v, wantError %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestCoordinator_SinglePage(t *testing.T) {
 	output := &bytes.Buffer{}
 	fetcher := &mockFetcher{

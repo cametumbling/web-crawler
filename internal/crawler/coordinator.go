@@ -76,6 +76,10 @@ func NewCoordinator(cfg Config) (*Coordinator, error) {
 		return nil, fmt.Errorf("start URL must use http or https scheme")
 	}
 
+	if cfg.NumWorkers <= 0 {
+		return nil, fmt.Errorf("NumWorkers must be positive, got %d", cfg.NumWorkers)
+	}
+
 	// Normalize the start URL
 	normalizedStart, ok := Sanitize(cfg.StartURL, startURL)
 	if !ok {
@@ -211,6 +215,12 @@ func (c *Coordinator) processResult(ctx context.Context, result Result) {
 	// We still process the result and call wg.Done() to maintain invariant.
 	finalKey := Key(result.FinalURL)
 	alreadyPrinted := result.URL != result.FinalURL && c.visited[finalKey]
+
+	// Mark the final URL as visited to prevent duplicate fetches
+	// (e.g., /old redirects to /new, then later we find a direct link to /new)
+	if result.URL != result.FinalURL {
+		c.visited[finalKey] = true
+	}
 
 	// Print the page (even on error), unless it's a redirect to an already-visited page
 	if !alreadyPrinted {

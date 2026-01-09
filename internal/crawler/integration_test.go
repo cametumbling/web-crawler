@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -378,4 +379,107 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 	// The key assertion: it terminated (didn't hang)
 	t.Log("✓ Crawler terminated gracefully on context cancellation")
+}
+
+// TestIntegration_RedirectDeduplication verifies that when /old redirects to /new,
+// and we later discover a direct link to /new, we don't re-fetch /new.
+func TestIntegration_RedirectDeduplication(t *testing.T) {
+	fetchCount := make(map[string]int)
+	var mu sync.Mutex
+
+	mux := http.NewServeMux()
+
+	// Root page links to /old (which redirects) and /page2
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		fetchCount["/"]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><body>
+			<a href="/old">Old link (redirects)</a>
+			<a href="/page2">Page 2</a>
+		</body></html>`))
+	})
+
+	// /old redirects to /final
+	mux.HandleFunc("/old", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fetchCount["/old"]++
+		mu.Unlock()
+		http.Redirect(w, r, "/final", http.StatusMovedPermanently)
+	})
+
+	// /final is the redirect target
+	mux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fetchCount["/final"]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><body><p>Final destination</p></body></html>`))
+	})
+
+	// /page2 has a direct link to /final (which we should have already visited via redirect)
+	mux.HandleFunc("/page2", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fetchCount["/page2"]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><body>
+			<a href="/final">Direct link to final</a>
+		</body></html>`))
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := httpclient.New(httpclient.Config{
+		Timeout:     5 * time.Second,
+		MaxBodySize: 1024 * 1024,
+	})
+	parser := &parserAdapter{}
+	output := &bytes.Buffer{}
+
+	cfg := crawler.Config{
+		StartURL:     server.URL + "/",
+		NumWorkers:   1, // Single worker to ensure deterministic ordering
+		MaxPages:     0,
+		Fetcher:      client,
+		Parser:       parser,
+		Output:       output,
+		OutputFormat: "text",
+	}
+
+	coord, err := crawler.NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator() error = %v", err)
+	}
+
+	err = coord.Crawl(context.Background())
+	if err != nil {
+		t.Fatalf("Crawl() error = %v", err)
+	}
+
+	// /final should only be fetched ONCE, even though:
+	// 1. /old redirects to /final
+	// 2. /page2 has a direct link to /final
+	mu.Lock()
+	finalFetchCount := fetchCount["/final"]
+	mu.Unlock()
+
+	if finalFetchCount != 1 {
+		t.Errorf("/final was fetched %d times, want 1 (redirect deduplication failed)", finalFetchCount)
+	}
+	t.Log("✓ Redirect target not re-fetched when discovered via direct link")
+
+	// Also verify /final only appears once in output
+	result := output.String()
+	visitedCount := strings.Count(result, "Visited: "+server.URL+"/final")
+	if visitedCount != 1 {
+		t.Errorf("/final appeared in output %d times, want 1", visitedCount)
+	}
+	t.Log("✓ Redirect target only printed once")
 }
